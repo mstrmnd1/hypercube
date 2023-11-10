@@ -1,12 +1,12 @@
-from base.cube_base import base
+from base.base_master import base
 import numpy as np
 from typing import Literal
 import itertools
-from scipy import stats
-import statsmodels.formula.api as smf
-import statsmodels.api as sm
+from hypercube.util.stats import t_test
+from hypercube.util.ops import run_cv
 
-class _ofat_(base):
+
+class OFAT(base):
 
   def __init__(self, estimator: object, param: dict, metric: str, 
                cv: int = 5, random_state: int = 0):
@@ -53,6 +53,7 @@ class _ofat_(base):
     if self.param_type != "discrete":
       raise ValueError("OFAT only supports discrete hyperparameter values")
 
+
   def fit(self, x: np.ndarray, y: np.ndarray, method: Literal['pair_t', 'anova'],
           alpha: float = None) -> None:
     """
@@ -92,15 +93,15 @@ class _ofat_(base):
     self.x = x
     self.y = y
     self.method = method
-    self.init_score = self._run_rep(self.init_param)
+    self.init_score = run_cv(x, y, self.estimator, self.init_param, 
+                             self.cv, self.scorer, self.random_state)
     self.best_score = self.init_score
+    self.alpha = alpha
 
     if self.method == "pair_t":
-      self.alpha = alpha
       self._pair_t()
     elif self.method == "anova":
-      return self._anova()
-    # self._post_process()
+      self._anova()
 
 
   def _pair_t(self) -> None:
@@ -115,35 +116,13 @@ class _ofat_(base):
     result = self._run_experiment()
 
     for idx, new_score in enumerate(result):
-      if self._t_test(self.best_score, new_score): 
+      if t_test(arr1=self.best_score, arr2=new_score, 
+                alternative="less", alpha=self.alpha): 
           # True if score is better than best_score
+          # For all metrics, greater is always better
           self.best_score = new_score
           self.best_param = combo[idx]
 
-  def _t_test(self, arr1, arr2):
-    """
-    `Overview`:
-      A private method used by _pair_t() function. It performs a paired t-test
-      on two score arrays, under user-defined alpha.
-
-    `Args`:
-    arr1: numpy.ndarray
-      a k-sized array of current best scores
-    arr2: numpy.ndarray
-      a k-sized array of scores to be compared
-
-    `Returns`:
-    bool: True if arr2 is better than arr1. False otherwise.
-      Note that arr2 is better than arr1 when p value is less than alpha, under 
-      the "less" alternative in scipy.stats.ttest_rel(). 
-      This is because, in all sklearn scorers, greater is always better (including
-      negative error matrics: neg_mean_squared_error). 
-    """
-    t_stat, p_val = stats.ttest_rel(arr1, arr2, alternative="less")
-    if p_val <= self.alpha:
-        return True
-    else:
-        return False
     
   def _anova(self) -> None:
 
@@ -185,55 +164,4 @@ class _ofat_(base):
     # print(anova_table)
     return model
   
-
-     
-
-
-
-
-class _surf_(base):
-
-  def __init__(self, estimator: object, param: dict, metric: str, 
-               cv: int = 5, random_state: int = 0):
-    """
-    `Overview`:
-    Response surface methods for hyperparameter tuning. 
-
-    Surf only supports factors/parameters with continuous levels/values. 
-
-    `Args`:
-    estimator: object
-      A trained estimator (classification or regression) from sklearn. It is
-      recommended to set random_state (if any) and any hyperparameters you'd
-      like to constrain before loading.
-
-      If evaluation metric involves predicting probabilities, then you need to
-      set predict_proba=True.
-
-    param: dict
-      A dictionary of style {"parameter name": (start, end)}. In Surf, parameter
-      type is constrained to continuous values only.
-
-    metric: str
-      A string indicating the evaluation metric/objective to be optimized. If
-      metric has inverse relationship with model performance (i.e. errors), use
-      "neg_" prefix (e.g. neg_mean_squared_error). Call
-      "sklearn.metrics.get_scorer_names()" to check all possible metric names.
-
-    cv: int
-      An integer representing the number of folds in K-Fold cross validation
-      strategy.
-
-    random_state: int or None
-      A integer indicate the random state for sampling or K-Fold validation,
-      if any. No random seed will be set if None was inputted.
-
-    """
-    super().__init__(estimator=estimator, param=param, metric=metric, 
-                     cv=cv, random_state=random_state)
-    if self.param_type != "continuous":
-      raise ValueError("Surf only supports continuous hyperparameter values")
-
-  def 
-    
     
