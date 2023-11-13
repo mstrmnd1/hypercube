@@ -1,6 +1,7 @@
 import numpy as np
 from copy import deepcopy
 from sklearn.model_selection import KFold
+import itertools
 
 def check_param(estimator, param):
     """
@@ -99,3 +100,26 @@ def run_CVexp(x, y, estimator, param, cv, scorer, random_state=1):
     return np.array(score)
 
 
+def get_design(param):
+    design_mtx = np.array(list(itertools.product(*param.values())))
+    return design_mtx
+
+def get_combo(param, design):
+    combo = [{k: v for k, v in zip(param.keys(), arr)} for arr in design]
+    return combo
+
+
+
+def get_baseline_design(param):
+    mtx = np.array(list(itertools.product(*param.values())))
+    bsln_mtx = []
+    col_names = []
+    for i in range(mtx.shape[1]):
+        col = mtx[:, i].astype(str)
+        uni_val = np.unique(col)
+        for j in range(1, len(uni_val)):
+            encoded = np.where(col == uni_val[j], 1, 0)
+            bsln_mtx.append(encoded)
+            col_names.append(uni_val[j])
+    bsln_mtx = np.array(bsln_mtx).T
+    return bsln_mtx, col_names

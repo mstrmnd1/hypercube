@@ -1,4 +1,4 @@
-from base.base_master import base
+from .base_master import base
 
 class Frac(base):
     

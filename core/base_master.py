@@ -1,12 +1,9 @@
 from typing import Literal
 import numpy as np
-from copy import deepcopy
-import itertools
 from sklearn.model_selection import KFold
 from sklearn import metrics
-from scipy import stats
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
-from hypercube.util.ops import check_param
+from ..util.ops import check_param
 from abc import ABC, abstractmethod
 
 
@@ -76,7 +73,7 @@ class base(ABC):
                        https://scikit-learn.org/stable/modules/model_evaluation.html#scoring-parameter")
     self.cv = cv
     self.init_param = estimator.get_params()
-    self.param_type = check_param()
+    self.param_type = check_param(self.estimator, self.param)
     self.random_state = random_state
 
   @abstractmethod
