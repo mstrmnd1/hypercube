@@ -1,6 +1,5 @@
 import numpy as np
 from typing import Literal
-import itertools
 
 from ..util.stats import t_test, regression, anova, z_scaler, log_scaler
 from ..util.ops import run_cv, run_CVexp, get_design, get_combo, get_baseline_design
@@ -57,7 +56,7 @@ class OFAT(base):
   def fit(self, x: np.ndarray, y: np.ndarray, method: Literal['pair_t', 
                                                               'anova',
                                                               "lm_fit"],
-          alpha: float = 0.05, scaling=None) -> None:
+          alpha: float = 0.05) -> None:
     """
     Main method for model fitting and tuning.
 
@@ -68,9 +67,13 @@ class OFAT(base):
     y: numpy array or list
       n-sized array with n target values
 
-    method: literal['pair_t', 'anova'].
-      'pair_t' is for paired t test approach.
-      'anova' is for analysis of variance approach. 
+    method: literal['pair_t', 'anova', 'lm_fit'].
+      'pair_t' is for paired t test approach. This selects the best combination of
+      hyperparameters, without any inference on individual/interaction effects.
+      'anova' is for analysis of variance approach. Note that this can only provide
+      inference on which hyperparameter is significant, not the direction of effect.
+      'lm_fit' is the linear regression approach. This provides both inference on
+      significant hyperparameters and the direction of effect. 
     
     alpha: float
       A float value between (0, 1), indicating level of significance for t-tests or
@@ -98,18 +101,19 @@ class OFAT(base):
     self.alpha = alpha
 
     if self.method == "pair_t":
-      self._PairT(x, y, scaling)
+      self._PairT(x, y)
     elif self.method == "anova":
       self._ANOVA(x, y)
     elif self.method == "lm_fit":
       self._LmFit(x, y)
 
 
-  def _PairT(self, x, y, scaling) -> None:
+  def _PairT(self, x, y) -> None:
     """
     `Overview`:
-    A private method performing paired t-tests. 
+    A private method for t-test approach. 
     """
+    # getting experiment results from design matrix
     self.design_mtx = get_design(self.param)
     self.combo = get_combo(self.param, self.design_mtx)
     exp_result = run_CVexp(x, y, estimator=self.estimator, param=self.combo,
@@ -122,60 +126,64 @@ class OFAT(base):
         self.best_param = self.combo[idx]
         continue
 
-      if scaling == 'log':
-        arr1 = log_scaler(self.best_score)
-        arr2 = log_scaler(new_score)
-      elif scaling == 'z':
-        _ = z_scaler(np.concatenate((self.best_score, new_score)))
-        midpoint = len(_) // 2
-        arr1 = _[:midpoint]
-        arr2 = _[midpoint:]
-      else:
-        arr1, arr2 = self.best_score, new_score
-
-      if t_test(arr1=arr1, arr2=arr2, alternative="less", 
-                alpha=self.alpha): 
+      if t_test(arr1=self.best_score, arr2=new_score, 
+                alternative="less", alpha=self.alpha): 
         # True if new_score is better (greater) than best_score
         self.best_score = new_score
         self.best_param = self.combo[idx]
 
-    print("Best hyperparameter combination:")
-    print(self.best_param)
 
     
   def _ANOVA(self, x, y) -> None:
+    """
+    `Overview`:
+    A private method for anova approach. 
+    """    
+    # getting experiment results from design matrix
     self.design_mtx = get_design(self.param)
     self.combo = get_combo(self.param, self.design_mtx)
     exp_result = run_CVexp(x, y, estimator=self.estimator, param=self.combo,
                        cv=self.cv, scorer=self.scorer, 
                        random_state=self.random_state)
+    
     loc = np.mean(exp_result, axis=1)
     disp = np.var(exp_result, axis=1)
-    anova_loc = anova(self.design_mtx, z_scaler(loc))
+    anova_loc = anova(self.design_mtx, loc)
+    # dispersion will be log-scaled
     anova_disp = anova(self.design_mtx, log_scaler(disp))
 
+    # finding important factors for location, based on specified alpha
     imp_idx = np.where(anova_loc['p values'] < self.alpha)[0].tolist()
     imp_factors = [list(self.param.keys())[i] for i in imp_idx]
-    print(f"{imp_factors} are significant for location")
-    
+    self.loc_factors = imp_factors
+  
+    # finding important factors for dispersion, based on specified alpha
     imp_idx = np.where(anova_disp['p values'] < self.alpha)[0].tolist()
     imp_factors = [list(self.param.keys())[i] for i in imp_idx]
-    print(f"{imp_factors} are significant for dispersion")
+    self.disp_factors = imp_factors
+    self.anova_loc = anova_loc
+    self.anova_disp = anova_disp
+
 
   def _LmFit(self, x, y) -> None:
     
     self.combo = get_combo(self.param, get_design(self.param))
     self.design_mtx, col_names = get_baseline_design(self.param)
+    col_names = np.insert(np.array(col_names), 0, "intercept")
+
     exp_result = run_CVexp(x, y, estimator=self.estimator, param=self.combo,
                        cv=self.cv, scorer=self.scorer, 
                        random_state=self.random_state)
-    loc = np.mean(exp_result, axis=1)
-    disp = np.var(exp_result, axis=1)
-    beta, p_vals = regression(self.design_mtx, loc)
-    print("For location:")
-    print(f"Beta: {beta}, p values: {p_vals}")
-    beta, p_vals = regression(self.design_mtx, log_scaler(disp))
-    print("For dispersion:")
-    print(f"Beta: {beta}, p values: {p_vals}")    
+    self.all_result = exp_result
+    self.loc = np.mean(exp_result, axis=1)
+    self.disp = np.var(exp_result, axis=1)
+
+    beta, p_vals, R_sqr = regression(self.design_mtx, self.loc)
+    self.loc_fit = np.vstack([col_names, beta, p_vals]).T
+    self.loc_R = R_sqr
+
+    beta, p_vals, R_sqr = regression(self.design_mtx, log_scaler(self.disp))
+    self.disp_fit = np.vstack([col_names, beta, p_vals]).T
+    self.disp_R = R_sqr
 
     

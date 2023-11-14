@@ -64,7 +64,10 @@ def regression(x, y, intercept=True, demean=False):
     t_list = abs(beta.flatten()) / se
     df = x.shape[0] - x.shape[1]
     p_vals = [round((1 - stats.t.cdf(t_stat, df=df))*2, 4) for t_stat in t_list]
-    return beta.flatten(), p_vals
+    RSS = np.linalg.norm(y - (x @ beta).flatten()) ** 2 
+    TSS = np.linalg.norm(y - np.mean(y)) ** 2
+    R_sqr = 1 - RSS/TSS
+    return beta.flatten(), np.array(p_vals), R_sqr
 
 
 def anova(design, y):

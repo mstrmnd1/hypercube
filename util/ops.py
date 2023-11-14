@@ -115,11 +115,13 @@ def get_baseline_design(param):
     bsln_mtx = []
     col_names = []
     for i in range(mtx.shape[1]):
+        param_name = list(param.keys())[i]
         col = mtx[:, i].astype(str)
         uni_val = np.unique(col)
         for j in range(1, len(uni_val)):
             encoded = np.where(col == uni_val[j], 1, 0)
             bsln_mtx.append(encoded)
-            col_names.append(uni_val[j])
+            new_name = param_name + "_" + uni_val[j]
+            col_names.append(new_name)
     bsln_mtx = np.array(bsln_mtx).T
     return bsln_mtx, col_names

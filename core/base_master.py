@@ -1,6 +1,3 @@
-from typing import Literal
-import numpy as np
-from sklearn.model_selection import KFold
 from sklearn import metrics
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from ..util.ops import check_param
@@ -13,10 +10,10 @@ class base(ABC):
                cv: int = 5, random_state: int = 0):
     """
     `Overview`:
-    Base class for hypercube--a hyperparameter optimizer.
+    Base class for hypercube.
 
     Hypercube uses design of experiment (DOE) approaches to design and analyze
-    hyperparameter experiments. Discrete, continuous or mixed hyperparameters
+    hyperparameter experiments. Discrete and continuous hyperparameters
     are supported.
 
     `Args`:
@@ -51,7 +48,7 @@ class base(ABC):
 
     random_state: int or None
       A integer indicate the random state for sampling or K-Fold validation,
-      if any. No random seed will be set if None was inputted.
+      if any. No random seed will be set if None was inputted. 
     """
     assert isinstance(estimator, (BaseEstimator, ClassifierMixin, RegressorMixin)), \
       "estimator must be a scikit-learn classifier or regressor"
@@ -78,28 +75,8 @@ class base(ABC):
 
   @abstractmethod
   def fit(self):
+      # This will be implemented within each main class (OFAT, Frac, Surf) 
       pass
-
-
-  # def _post_process(self) -> None:
-  #   """
-  #   `Overview`: 
-  #   A private method for post-processing the experiment results. Logging
-  #   key information as object attributes for easy access.
-  #   """
-  #   self.best_model = deepcopy(self.estimator).set_params(**self.best_param)
-  #   self.best_model.fit(self.x, self.y)
-
-
-  def predict(self, test_x):
-    """
-    `Overview`: 
-    A public method for using the best model to predict y on new observation
-    x. Recall that the best model is stored in self.best_model, and this estimator
-    has already been trained in post-processing.
-    """
-    pred_y = self.best_model.predict(test_x)
-    return pred_y
 
 
 
