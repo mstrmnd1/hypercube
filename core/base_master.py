@@ -77,6 +77,19 @@ class base(ABC):
   def fit(self):
       # This will be implemented within each main class (OFAT, Frac, Surf) 
       pass
+  
+
+  def summary(self):
+
+    if self.method == "pair_t": # pair_t approach does not generate summary
+      pass
+    else:
+      for item in self._summary_:
+        print(f"{item}:")
+        print(f"{self._summary_[item]}\n")
+    print(f"Best parameter combination: {self.best_param}")
+    print(f"Best CV scores: {self.best_score}")
+
 
 
 

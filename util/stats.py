@@ -1,12 +1,13 @@
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 def log_scaler(y):
+    
     if np.min(y) <= 0:
-        pass
-    if np.max(y) <= 1:
-        y = np.log(y)
-    return y
+       y[y <= 0] = np.min(y[y > 0])
+  
+    return np.log(y)
 
 def z_scaler(data):
     
@@ -51,64 +52,80 @@ def t_test(arr1, arr2, alternative, alpha):
     else:
         return False
     
-def regression(x, y, intercept=True, demean=False):
-    if demean:
-      x = x - x.mean(axis=0)
+
+def regression(x, y, intercept=True):
+
+    """
+    perform linear regression, return regression table
+    """
     if intercept:
       x = np.hstack((np.ones((x.shape[0], 1)), x))
     beta = (np.linalg.inv(x.T @ x) @ x.T @ y)[:, np.newaxis]
-    sse = np.linalg.norm((x @ beta).flatten() - y)**2
-    mse = sse / (x.shape[0] - x.shape[1])
-    var = mse * np.linalg.inv(x.T @ x)
-    se = np.sqrt(np.diag(var))
-    t_list = abs(beta.flatten()) / se
-    df = x.shape[0] - x.shape[1]
-    p_vals = [round((1 - stats.t.cdf(t_stat, df=df))*2, 4) for t_stat in t_list]
-    RSS = np.linalg.norm(y - (x @ beta).flatten()) ** 2 
+
     TSS = np.linalg.norm(y - np.mean(y)) ** 2
+    RSS = np.linalg.norm((x @ beta).flatten() - y)**2
+    mRSS = RSS / (x.shape[0] - x.shape[1])
+
+    beta_se = np.sqrt(np.diag(mRSS * np.linalg.inv(x.T @ x)))
+    t_list = abs(beta.flatten()) / beta_se
+
+    df = x.shape[0] - x.shape[1]
+    p_vals = np.array([round((1 - stats.t.cdf(t_stat, df=df))*2, 4) 
+                      for t_stat in t_list])
     R_sqr = 1 - RSS/TSS
-    return beta.flatten(), np.array(p_vals), R_sqr
+
+    summary = pd.DataFrame({"coef": beta.flatten(), "p_val": p_vals, 
+                            "R^2": ""})
+    summary.at[0, "R^2"] = R_sqr
+    return summary
 
 
 def anova(design, y):
+    """
+    perform anova for qualitative factors, return anova table
+    """
+    design = design.astype(str)
+    if (np.ndim(y) == 1) or (1 in y.shape):
+      n = 1
+    else:
+      assert y.shape[0] == design.shape[0]
+      n = y.shape[1]
+      y = np.hstack(y)
+      design = np.repeat(design, n, axis=0)
+    
+    def count_unique(column):
+      return len(np.unique(column))
 
-  design = design.astype(str)
-  if (np.ndim(y) == 1) or (1 in y.shape):
-    n = 1
-  else:
-    assert y.shape[0] == design.shape[0]
-    n = y.shape[1]
-    y = np.hstack(y)
-    design = np.repeat(design, n, axis=0)
-  
-  def count_unique(column):
-    return len(np.unique(column))
+    level_counts = np.apply_along_axis(count_unique, axis=0, arr=design)
+    model_df = level_counts - 1
+    total_df = len(design) - 1
+    MSS = []
+    # below is calculating the model sum of squares
+    # this can probably to optimized :)
+    for i in range(design.shape[1]):
+      col = design[:, i]
+      ss = 0
+      uni_vals = np.unique(col)
+      for v in uni_vals:
+        idx = np.where(col == v)
+        ss += (np.mean(y[idx]) - np.mean(y))**2 
+      ss = n*ss*np.product(level_counts[np.arange(len(level_counts)) != i])
+      MSS.append(ss)
 
-  level_counts = np.apply_along_axis(count_unique, axis=0, arr=design)
-  model_df = level_counts - 1
-  total_df = len(design) - 1
-  MSS = []
-  for i in range(design.shape[1]):
-    col = design[:, i]
-    ss = 0
-    uni_vals = np.unique(col)
-    for v in uni_vals:
-      idx = np.where(col == v)
-      ss += (np.mean(y[idx]) - np.mean(y))**2 
-    ss = n*ss*np.product(level_counts[np.arange(len(level_counts)) != i])
-    MSS.append(ss)
+    TSS = np.linalg.norm(y - np.mean(y))**2
+    RSS = TSS - sum(MSS)
+    res_df = total_df - np.sum(model_df)
+    f_stat = (np.array(MSS) / model_df) / (RSS / res_df)
+    p_val = [1 - stats.f.cdf(f, dfn=dfn, dfd=res_df) for f, dfn in zip(f_stat, model_df)]
 
-  TSS = len(design)*np.var(y)
-  RSS = TSS - sum(MSS)
-  res_df = total_df - np.sum(model_df)
-  mRSS = RSS / res_df
-  f_stat = (np.array(MSS) / model_df) / mRSS
-  p_val = [1 - stats.f.cdf(f, dfn=dfn, dfd=res_df) for f, dfn in zip(f_stat, model_df)]
-  return {"model SS": np.round(MSS, 4), 
-          "model df": model_df,
-          "residual SS": np.round(RSS, 4),
-          "residual df": res_df,
-          "total SS": np.round(TSS, 4),
-          "total df": total_df,
-          "p values": np.round(p_val, 4)
-          }
+    summary = pd.DataFrame(columns=["SS", "df", "p-val"], 
+                      index=range(len(p_val)+2)) # len(p_val) is the number of factors
+    summary["SS"][:len(p_val)] = np.round(MSS, 4)
+    summary["df"][:len(p_val)] = model_df
+    summary['p-val'][:len(p_val)] = np.round(p_val, 4)
+    summary.at[len(p_val), "SS"] = np.round(RSS, 4)
+    summary.at[len(p_val), "df"] = res_df
+    summary.at[len(p_val)+1, "SS"] = np.round(TSS, 4)
+    summary.at[len(p_val)+1, "df"] = total_df
+    return summary
+
