@@ -33,8 +33,15 @@ class LHSTuner(base):
         Generate Latin Hypercube Samples with maximin criterion.
         """
         lhs_samples = lhs(len(self.param), samples=self.n_samples, criterion="maximin")
-        scaled_samples = np.array([np.linspace(start, end, self.n_samples) for (start, end) in self.param.values()])
-        return lhs_samples * scaled_samples.T
+        for i in range(len(self.param.values())):
+            v_pair = list(self.param.values())[i]
+            scale, loc = (v_pair[1] - v_pair[0]), v_pair[0]
+            lhs_samples[:, i] = (lhs_samples[:, i]) * scale + loc
+
+        lhs_samples = lhs_samples.astype(int) # for now
+        self.design_mtx = lhs_samples
+        self.combo = [{k: v for k, v in zip(self.param.keys(), arr)} for arr in self.design_mtx]
+
 
     def fit(self, x: np.ndarray, y: np.ndarray, method: Literal['pair_t', 'anova', "lm_fit"], alpha: float = None) -> None:
         """
@@ -63,7 +70,15 @@ class LHSTuner(base):
         }
 
     # Generate LHS samples
-        lhs_samples = self._generate_lhs_samples()
+        self._generate_lhs_samples()
+        self.run(x, y)
+        method_map[self.method]()
+
+
+    def run(self, x, y) -> None:
+        self.exp_result = run_CVexp(x, y, estimator=self.estimator, param=self.combo,
+                        cv=self.cv, scorer=self.scorer, 
+                        random_state=self.random_state)
 
 
     def _PairT(self) -> None:
@@ -111,14 +126,14 @@ class LHSTuner(base):
 
     def _LmFit(self) -> None:
 
-        self.bsln_mtx, col_names = get_baseline_design(self.param)
         loc, disp = np.mean(self.exp_result, axis=1), np.var(self.exp_result, axis=1)
 
         self._summary_ = {}
+        col_names = list(self.param.keys())
         col_names = np.insert(col_names, 0, "intercept")
         # calling "regression" function to return regression table (pd dataframe)
-        self._summary_["Location"] = regression(self.bsln_mtx, loc)
-        self._summary_["Dispersion"] = regression(self.bsln_mtx, 
+        self._summary_["Location"] = regression(self.design_mtx, loc)
+        self._summary_["Dispersion"] = regression(self.design_mtx, 
                                                 log_scaler(disp)) # dispersion is log-scaled
         self._summary_["Location"].set_index(pd.Index(col_names), inplace=True)
         self._summary_["Dispersion"].set_index(pd.Index(col_names), inplace=True)
