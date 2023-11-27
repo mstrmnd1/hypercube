@@ -2,10 +2,9 @@ import numpy as np
 import pandas as pd
 from typing import Literal
 from pyDOE import lhs
-from scipy.spatial.distance import pdist, squareform
 
 from ..util.stats import t_test, regression, anova, z_scaler, log_scaler
-from ..util.ops import run_cv, run_CVexp, get_baseline_design
+from ..util.ops import run_cv, run_CVexp, get_param_types, get_scale_loc, coor_change
 from .base_master import base
 
 class LHSTuner(base):
@@ -24,22 +23,26 @@ class LHSTuner(base):
             n_samples: The number of samples to generate in the Latin Hypercube.
         """
         super().__init__(estimator=estimator, param=param, metric=metric, cv=cv, random_state=random_state)
-        if self.param_type != "continuous":
-            raise ValueError("LHSTuner only supports continuous hyperparameter values")
         self.n_samples = n_samples
+        self.param_types = get_param_types(self.param)
+        self.param_range = list(self.param.values())
+        self.range_types = [t[1] for t in list(self.param.values())]
 
     def _generate_lhs_samples(self):
         """
         Generate Latin Hypercube Samples with maximin criterion.
         """
         lhs_samples = lhs(len(self.param), samples=self.n_samples, criterion="maximin")
-        for i in range(len(self.param.values())):
-            v_pair = list(self.param.values())[i]
-            scale, loc = (v_pair[1] - v_pair[0]), v_pair[0]
-            lhs_samples[:, i] = (lhs_samples[:, i]) * scale + loc
-
-        lhs_samples = lhs_samples.astype(int) # for now
-        self.design_mtx = lhs_samples
+        unit_range = [(0, 1)] * len(self.param)
+        scale_shift, loc_shift = get_scale_loc(unit_range=unit_range,
+                                               param_range=self.param_range)
+        new = []
+        for row in lhs_samples:
+            new.append(coor_change(row, scale_shift=scale_shift, loc_shift=loc_shift, 
+                        input_type="unit", range_types=self.range_types,
+                        param_types=self.param_types))
+            
+        self.design_mtx = new
         self.combo = [{k: v for k, v in zip(self.param.keys(), arr)} for arr in self.design_mtx]
 
 
