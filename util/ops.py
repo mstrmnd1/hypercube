@@ -252,12 +252,13 @@ def coor_change(coor, scale_shift, loc_shift, input_type, param_types):
     # mapped_x = (x - loc) / scale
     if input_type == "unit":
       arr = loc_shift + scale_shift * coor 
-    elif input_type == "orig":
+    elif input_type == "param":
       arr = (coor - loc_shift) / scale_shift
 
     arr = arr.tolist()
 
     if input_type == 'unit':
+      # this means we are mapping to param space, need t be cautious of param types (int or float)
       for i in range(len(param_types)):
         if list(param_types.values())[i] == "int":
           arr[i] = int(np.round(arr[i])) 
