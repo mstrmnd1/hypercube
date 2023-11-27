@@ -58,6 +58,8 @@ def regression(x, y, intercept=True):
     """
     perform linear regression, return regression table
     """
+    x = np.array(x)
+    y = np.array(y)
     if intercept:
       x = np.hstack((np.ones((x.shape[0], 1)), x))
     beta = (np.linalg.inv(x.T @ x) @ x.T @ y)[:, np.newaxis]
