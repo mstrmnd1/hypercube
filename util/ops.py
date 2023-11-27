@@ -192,3 +192,77 @@ def get_baseline_design(param) -> (np.ndarray, np.ndarray):
             col_names.append(new_name)
     bsln_mtx = np.array(bsln_mtx).T
     return bsln_mtx, np.array(col_names)
+
+
+def get_param_types(param: dict):
+    """
+    A helper function to get types (integer or float) of param space. Returns a 
+    dictionary with keys as param names, and values as param types ("int" or "float")
+    `Param`: dict
+      A dictionary with keys as parameter names, and values as parameter value range.
+      If a parameter can only take on integer values, use only whole numbers (-3, 5, etc.)
+      in range specification.
+    """
+    param_types = {}
+    for name in param:
+      if isinstance(param[name][0], int) and isinstance(param[name][1], int):
+        param_types[name] = 'int'
+      elif isinstance(param[name][0], float) and isinstance(param[name][1], float):
+        param_types[name] = 'float'
+      else:
+        raise ValueError(f"Incompatible or inconsistent types detected for {name} parameter")
+    return param_types
+
+def get_scale_loc(unit_range, param_range):
+
+    """
+    A helper function to get scale and location shifter from unit range to param range,
+    or vice versa. Both returned values are numpy arrays.
+    """
+    # supposed unit range is (a, b). param range is (c, d)
+    # scale shifter = (d - c) / (b - a)
+    # loc shifter = c - (1 + scale)*a
+
+    scale_shift, loc_shift = [], []
+    for i in range(len(param_range)):
+      scale = (param_range[i][1] - param_range[i][0])/(unit_range[i][1] - unit_range[i][0])
+      loc = param_range[i][0] - (1+scale)* unit_range[i][0]
+      scale_shift.append(scale)
+      loc_shift.append(loc)
+    scale_shift = np.array(scale_shift)
+    loc_shift = np.array(loc_shift)
+
+    return scale_shift, loc_shift
+
+def coor_change(coor, scale_shift, loc_shift, input_type, param_types):
+    """
+    A helper function to map the points between two coordinate system (spaces).
+    Scale and loc shift are obtained through get_scale_loc() function.
+
+    `coor`: point to be mapped
+    `scale_shift`: scale shifters
+    `loc_shift`: location shifters
+    `input_type`: "unit" if coor is from unit range, "param" if coor is
+    from param range
+    `param_types`: types of parameter spaces. obtained through get_param_types()
+    """
+    # Map point (x) from unit range (a, b) to param range (c, d):
+    # mapped_x = loc + scale * x
+    # Map point (x) from param range (c, d) to unit range (a, b):
+    # mapped_x = (x - loc) / scale
+    if input_type == "unit":
+      arr = loc_shift + scale_shift * coor 
+    elif input_type == "orig":
+      arr = (coor - loc_shift) / scale_shift
+
+    arr = arr.tolist()
+
+    if input_type == 'unit':
+      for i in range(len(param_types)):
+        if list(param_types.values())[i] == "int":
+          arr[i] = int(np.round(arr[i])) 
+          # native int() method does not do proper rounding
+          # np.round() does proper rounding, but will still return a float
+          # chaining eliminates both issues
+
+    return arr
