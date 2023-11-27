@@ -199,42 +199,50 @@ def get_param_types(param: dict):
     A helper function to get types (integer or float) of param space. Returns a 
     dictionary with keys as param names, and values as param types ("int" or "float")
     `Param`: dict
-      A dictionary with keys as parameter names, and values as parameter value range.
-      If a parameter can only take on integer values, use only whole numbers (-3, 5, etc.)
-      in range specification.
+      {param_name: [(start, end), scale]}
+      param_name: name of hyperparameter
+      start: starting point of parameter value range
+      end: ending point of parameter value range
+      scale: "unif" for uniform range, "log10" for based-10 log range
     """
     param_types = {}
     for name in param:
-      if isinstance(param[name][0], int) and isinstance(param[name][1], int):
+      if isinstance(param[name][0][0], int) and isinstance(param[name][0][1], int):
         param_types[name] = 'int'
-      elif isinstance(param[name][0], float) and isinstance(param[name][1], float):
+      elif isinstance(param[name][0][0], float) or isinstance(param[name][0][1], float):
         param_types[name] = 'float'
-      else:
-        raise ValueError(f"Incompatible or inconsistent types detected for {name} parameter")
     return param_types
 
 def get_scale_loc(unit_range, param_range):
 
     """
     A helper function to get scale and location shifter from unit range to param range,
-    or vice versa. Both returned values are numpy arrays.
+    or vice versa. 
+    unit_range: [(start1, end1), (start2, end2), ...]
+    param_range: [[(start1, end1), scale1], [(start2, end2), scale2], ...]
     """
-    # supposed unit range is (a, b). param range is (c, d)
+    # suppose unit range is unif(a, b), param range is unif(c, d)
     # scale shifter = (d - c) / (b - a)
     # loc shifter = c - (1 + scale)*a
 
+    # suppose unit range is unif(a, b), param range is log10-scaled(c, d)
+    # scale shifter = (d - c) / (log(b) - log(a))
+    # loc shifter = c - scale*log(a)
+
     scale_shift, loc_shift = [], []
     for i in range(len(param_range)):
-      scale = (param_range[i][1] - param_range[i][0])/(unit_range[i][1] - unit_range[i][0])
-      loc = param_range[i][0] - (1+scale)* unit_range[i][0]
+      a, b, c, d = unit_range[i][0], unit_range[i][1], param_range[i][0][0], param_range[i][0][1]
+      if param_range[i][1] == "unif":
+        scale = (d - c)/(b - a)
+        loc = c - (1+scale)*a
+      elif param_range[i][1] == "log10":
+        scale = (b - a)/(np.log10(d) - np.log10(c))
+        loc = a - scale*np.log10(c)
       scale_shift.append(scale)
       loc_shift.append(loc)
-    scale_shift = np.array(scale_shift)
-    loc_shift = np.array(loc_shift)
+    return np.array(scale_shift), np.array(loc_shift)
 
-    return scale_shift, loc_shift
-
-def coor_change(coor, scale_shift, loc_shift, input_type, param_types):
+def coor_change(coor, scale_shift, loc_shift, input_type, range_types, param_types):
     """
     A helper function to map the points between two coordinate system (spaces).
     Scale and loc shift are obtained through get_scale_loc() function.
@@ -244,18 +252,33 @@ def coor_change(coor, scale_shift, loc_shift, input_type, param_types):
     `loc_shift`: location shifters
     `input_type`: "unit" if coor is from unit range, "param" if coor is
     from param range
-    `param_types`: types of parameter spaces. obtained through get_param_types()
+    `range_types`: list of types of ranges. Type is either "unif" or "log10".
+    `param_types`: list of types of parameter spaces. Type is either "int" or "float"
     """
-    # Map point (x) from unit range (a, b) to param range (c, d):
+    # suppose unit range is unif(a, b), param range is unif(c, d). Map x from (a, b) to (c, d):
     # mapped_x = loc + scale * x
-    # Map point (x) from param range (c, d) to unit range (a, b):
+    # suppose unit range is unif(a, b), param range is unif(c, d). Map x from (c, d) to (a, b):
     # mapped_x = (x - loc) / scale
-    if input_type == "unit":
-      arr = loc_shift + scale_shift * coor 
-    elif input_type == "param":
-      arr = (coor - loc_shift) / scale_shift
 
-    arr = arr.tolist()
+    # suppose unit range is unif(a, b), param range is log10-scaled (c, d). Map x from (a, b) to (c, d):
+    # mapped_x = 10^((x - loc)/scale)
+    # suppose unit range is unif(a, b), param range is log10-scaled (c, d). Map x from (c, d) to (a, b):
+    # mapped_x = log(x) * scale + loc
+
+    arr = []
+    if input_type == "unit":
+      for i in range(len(coor)):
+        if range_types[i] == "unif":
+          arr.append(loc_shift[i] + scale_shift[i] * coor[i])
+        elif range_types[i] == "log10":
+          arr.append(10**((coor[i] - loc_shift[i])/ scale_shift[i]))
+        
+    elif input_type == "param":
+      for i in range(len(coor)):
+        if range_types[i] == "unif":
+          arr.append((coor[i] - loc_shift[i]) / scale_shift[i])
+        elif range_types[i] == "log10":
+          arr.append(np.log10(coor[i]) * scale_shift[i] + loc_shift[i])
 
     if input_type == 'unit':
       # this means we are mapping to param space, need t be cautious of param types (int or float)
@@ -265,5 +288,4 @@ def coor_change(coor, scale_shift, loc_shift, input_type, param_types):
           # native int() method does not do proper rounding
           # np.round() does proper rounding, but will still return a float
           # chaining eliminates both issues
-
     return arr
