@@ -1,7 +1,8 @@
 import numpy as np
 from copy import deepcopy
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 import itertools
+from scipy.stats import loguniform, uniform, norm
 
 def check_param(estimator, param):
     """
@@ -95,12 +96,18 @@ def run_cv(x: np.ndarray, y: np.ndarray, estimator: object, param_dict: dict,
     """
     score, copy_estimator = [], deepcopy(estimator)
     copy_estimator.set_params(**param_dict)
-    for train_idx, val_idx in KFold(n_splits=cv, shuffle=True,
-                                    random_state=random_state).split(x, y):
-        train_x, train_y = x[train_idx], y[train_idx]
-        val_x, val_y = x[val_idx], y[val_idx]
-        score.append(run_rep(train_x, train_y, val_x, val_y, 
-                             copy_estimator, scorer))
+    if cv >= 2:
+      for train_idx, val_idx in KFold(n_splits=cv, shuffle=True,
+                                      random_state=random_state).split(x, y):
+          train_x, train_y = x[train_idx], y[train_idx]
+          val_x, val_y = x[val_idx], y[val_idx]
+          score.append(run_rep(train_x, train_y, val_x, val_y, 
+                              copy_estimator, scorer))
+    elif cv == 1:
+       train_x, val_x, train_y, val_y = train_test_split(x, y, test_size=0.25, 
+                                                         random_state=random_state)
+       score = run_rep(train_x, train_y, val_x, val_y, 
+                       copy_estimator, scorer)
     return score
 
 
@@ -146,7 +153,7 @@ def get_design(param) -> np.ndarray:
     design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
     return design_mtx
 
-def get_combo(param) -> list:
+def get_combo(param, design_mtx=None) -> list:
     """
     Get combinations of hyperparameters to be experimented.
 
@@ -156,11 +163,36 @@ def get_combo(param) -> list:
       combination. Such dictionary must be readable via sklearn's 
       estimator.set_params(**param). 
     """
-    design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
+    if design_mtx is None:
+       design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
     combo = [{k: v for k, v in zip(param.keys(), arr)} for arr in design_mtx]
     return combo
 
+def get_full_design(p):
+    """
+    generate full factorial experiment for p two-level factors. The returned design 
+    matrix should be shaped 2^p * p. Returned matrix will be encoded using zero-sum 
+    constraints (-1 and 1).
+    """
+    levels = [-1, 1]
+    full_factorial = np.array(np.meshgrid(*([levels] * p))).T.reshape(-1, p)
 
+    return full_factorial
+
+       
+def get_2_interaction(design_mtx):
+   
+    num_columns = design_mtx.shape[1]
+    interaction_columns = []
+
+    for i in range(num_columns):
+        for j in range(i + 1, num_columns):
+            interaction_column = design_mtx[:, i] * design_mtx[:, j]
+            interaction_columns.append(interaction_column)
+
+    interaction_matrix = np.column_stack([design_mtx] + interaction_columns)
+    return interaction_matrix
+   
 def get_baseline_design(param) -> (np.ndarray, np.ndarray):
     """
     Function to get qualitative/discrete variable encoding using baseline 
@@ -192,3 +224,96 @@ def get_baseline_design(param) -> (np.ndarray, np.ndarray):
             col_names.append(new_name)
     bsln_mtx = np.array(bsln_mtx).T
     return bsln_mtx, np.array(col_names)
+
+def get_pb12():
+   
+    row1 = [1, 1, -1, 1, 1, 1, -1, -1, -1, 1, -1]
+    pb_12 = [row1]
+    for i in range(10):
+      last_trail = pb_12[-1][-1]
+      new = pb_12[-1].copy()
+      new.pop()
+      new.insert(0, last_trail)
+      pb_12.append(new)
+    pb_12.append([-1 for _ in range(11)]) 
+    pb_12 = np.array(pb_12) # 12*11 PB design generated
+    return pb_12
+
+def get_param_types(param: dict):
+    """
+    A helper function to get types (integer or float) of param space. Returns a 
+    dictionary with keys as param names, and values as param types ("int" or "float")
+    `Param`: dict
+      {param_name: [(start, end), range_type]}
+      param_name: name of hyperparameter
+      start: starting point of parameter value range
+      end: ending point of parameter value range
+      range_type: "unif" for uniform range, "log10" for based-10 log range
+    """
+    param_types = []
+    for name in param:
+      if isinstance(param[name][0][0], int) and isinstance(param[name][0][1], int):
+        param_types.append('int')
+      elif isinstance(param[name][0][0], float) or isinstance(param[name][0][1], float):
+        param_types.append('float')
+    return param_types
+
+
+def coor_change(x, param_type, loc_scale, dist_type, input_type, unit_range=None):
+
+  """
+  Helper function for coordinate changes. 
+  
+  x: list or np.ndarray   
+    Must be one-dimensional.  
+  param_type: list
+    A list of parameter types: "int" or "float"
+  loc_scale: list  
+    A list of tuples of form (loc, scale) for parameter distribution.  
+  dist_type: list
+    A list of parameter distribution. Values must be "log10", "unif" or "norm"
+  input_type: str
+    Type of input coordinates to be mapped. If input_type == "unit", then map points
+    to param space. If input_type == "param", map points to unit space. 
+  """
+  x = np.array(x)
+  new = []
+  trfm = {"log10": loguniform,
+          "unif": uniform,
+          "norm": norm}
+
+  n = len(x)
+  if unit_range is None:
+    if input_type == "unit":
+      for i in range(n):
+        new.append(trfm[dist_type[i]].ppf(x[i], loc_scale[i][0], 
+                                            loc_scale[i][1]))
+    elif input_type == "param":
+      for i in range(n):
+        new.append(trfm[dist_type[i]].cdf(x[i],loc_scale[i][0], 
+                                            loc_scale[i][1]))
+  else:
+    if input_type == "unit":
+      for i in range(n):
+        cdf = uniform.cdf(x[i], unit_range[i][0], unit_range[i][1])
+        new.append(trfm[dist_type[i]].ppf(cdf, loc_scale[i][0], 
+                                          loc_scale[i][1]))
+    elif input_type == "param":
+      for i in range(n):
+        cdf = trfm[dist_type[i]].cdf(x[i],loc_scale[i][0], loc_scale[i][1])
+        new.append(uniform.pdf(cdf, unit_range[i][0], unit_range[i][1]))
+    else:
+       raise TypeError
+     
+
+  if input_type == 'unit':
+      # this means we are mapping to param space, need t be cautious of param types (int or float)
+      for i in range(n):
+        if param_type[i] == "int":
+            new[i] = int(np.round(new[i])) 
+          # native int() method does not do proper rounding
+          # np.round() does proper rounding, but will still return a float
+          # chaining eliminates both issues
+  return new
+
+  

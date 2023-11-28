@@ -58,6 +58,8 @@ def regression(x, y, intercept=True):
     """
     perform linear regression, return regression table
     """
+    x = np.array(x)
+    y = np.array(y)
     if intercept:
       x = np.hstack((np.ones((x.shape[0], 1)), x))
     beta = (np.linalg.inv(x.T @ x) @ x.T @ y)[:, np.newaxis]
@@ -72,7 +74,10 @@ def regression(x, y, intercept=True):
     df = x.shape[0] - x.shape[1]
     p_vals = np.array([round((1 - stats.t.cdf(t_stat, df=df))*2, 4) 
                       for t_stat in t_list])
-    R_sqr = 1 - RSS/TSS
+    if TSS == 0:
+       R_sqr = 0
+    else:
+       R_sqr = 1 - RSS/TSS
 
     summary = pd.DataFrame({"coef": beta.flatten(), "p_val": p_vals, 
                             "R^2": ""})
