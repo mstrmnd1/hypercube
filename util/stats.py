@@ -89,6 +89,7 @@ def anova(design, y):
     """
     perform anova for qualitative factors, return anova table
     """
+    design = np.array(design)
     design = design.astype(str)
     if (np.ndim(y) == 1) or (1 in y.shape):
       n = 1

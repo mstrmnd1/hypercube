@@ -154,21 +154,20 @@ class LHSTuner(base):
         gp = gp_init(self.kernel, self.random_state)
         bounds = [(0, 1)] * len(self.param)
         opt_x, m1 = get_next_point(gp, np.array(self.lhs_sample), loc, bounds=bounds)
-        print(opt_x)
         opt_x = coor_change(opt_x, param_type=self.param_type, 
                             dist_type=self.dist_type, loc_scale = self.loc_scale, 
                             input_type="unit")
-        print(opt_x)
         opt_x= {k: v for k, v in zip(self.param.keys(), opt_x)}
-        print(opt_x)
         opt_score = run_cv(x, y, self.estimator, param_dict=opt_x, cv=self.cv,
                scorer=self.scorer, random_state=self.random_state)
-        print(opt_score)
-        
+        self.GP_opt = opt_x
+        self.GP_score = opt_score
         if np.mean(opt_score) <= np.max(loc): # our GP failed :(
             best_idx = np.argmax(loc)
             self.best_param = self.combo[best_idx]
             self.best_score = loc[best_idx]
+            self.lhs_opt = self.combo[best_idx]
+            self.lhs_score = loc[best_idx]
         else:
             self.best_param = opt_x
             self.best_score = opt_score
