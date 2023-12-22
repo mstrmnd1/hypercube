@@ -97,15 +97,13 @@ def run_cv(x: np.ndarray, y: np.ndarray, estimator: object, param_dict: dict,
     score, copy_estimator = [], deepcopy(estimator)
     copy_estimator.set_params(**param_dict)
     if cv >= 2:
-      for train_idx, val_idx in KFold(n_splits=cv, shuffle=True,
-                                      random_state=random_state).split(x, y):
+      for train_idx, val_idx in KFold(n_splits=cv, shuffle=True).split(x, y):
           train_x, train_y = x[train_idx], y[train_idx]
           val_x, val_y = x[val_idx], y[val_idx]
           score.append(run_rep(train_x, train_y, val_x, val_y, 
                               copy_estimator, scorer))
     elif cv == 1:
-       train_x, val_x, train_y, val_y = train_test_split(x, y, test_size=0.25, 
-                                                         random_state=random_state)
+       train_x, val_x, train_y, val_y = train_test_split(x, y, test_size=0.25)
        score = run_rep(train_x, train_y, val_x, val_y, 
                        copy_estimator, scorer)
     return score
