@@ -74,7 +74,10 @@ def regression(x, y, intercept=True):
     df = x.shape[0] - x.shape[1]
     p_vals = np.array([round((1 - stats.t.cdf(t_stat, df=df))*2, 4) 
                       for t_stat in t_list])
-    R_sqr = 1 - RSS/TSS
+    if TSS == 0:
+       R_sqr = 0
+    else:
+       R_sqr = 1 - RSS/TSS
 
     summary = pd.DataFrame({"coef": beta.flatten(), "p_val": p_vals, 
                             "R^2": ""})
@@ -86,6 +89,7 @@ def anova(design, y):
     """
     perform anova for qualitative factors, return anova table
     """
+    design = np.array(design)
     design = design.astype(str)
     if (np.ndim(y) == 1) or (1 in y.shape):
       n = 1

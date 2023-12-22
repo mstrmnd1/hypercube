@@ -50,8 +50,6 @@ class OFAT(base):
     """
     super().__init__(estimator=estimator, param=param, metric=metric, 
                      cv=cv, random_state=random_state)
-    if self.param_type != "discrete":
-      raise ValueError("OFAT only supports discrete hyperparameter values")
 
 
   def fit(self, x: np.ndarray, y: np.ndarray, method: Literal['pair_t', 

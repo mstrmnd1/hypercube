@@ -1,7 +1,8 @@
 import numpy as np
 from copy import deepcopy
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 import itertools
+from scipy.stats import loguniform, uniform, norm
 
 def check_param(estimator, param):
     """
@@ -95,12 +96,16 @@ def run_cv(x: np.ndarray, y: np.ndarray, estimator: object, param_dict: dict,
     """
     score, copy_estimator = [], deepcopy(estimator)
     copy_estimator.set_params(**param_dict)
-    for train_idx, val_idx in KFold(n_splits=cv, shuffle=True,
-                                    random_state=random_state).split(x, y):
-        train_x, train_y = x[train_idx], y[train_idx]
-        val_x, val_y = x[val_idx], y[val_idx]
-        score.append(run_rep(train_x, train_y, val_x, val_y, 
-                             copy_estimator, scorer))
+    if cv >= 2:
+      for train_idx, val_idx in KFold(n_splits=cv, shuffle=True).split(x, y):
+          train_x, train_y = x[train_idx], y[train_idx]
+          val_x, val_y = x[val_idx], y[val_idx]
+          score.append(run_rep(train_x, train_y, val_x, val_y, 
+                              copy_estimator, scorer))
+    elif cv == 1:
+       train_x, val_x, train_y, val_y = train_test_split(x, y, test_size=0.25)
+       score = run_rep(train_x, train_y, val_x, val_y, 
+                       copy_estimator, scorer)
     return score
 
 
@@ -146,7 +151,7 @@ def get_design(param) -> np.ndarray:
     design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
     return design_mtx
 
-def get_combo(param) -> list:
+def get_combo(param, design_mtx=None) -> list:
     """
     Get combinations of hyperparameters to be experimented.
 
@@ -156,11 +161,36 @@ def get_combo(param) -> list:
       combination. Such dictionary must be readable via sklearn's 
       estimator.set_params(**param). 
     """
-    design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
+    if design_mtx is None:
+       design_mtx = np.asarray(list(itertools.product(*param.values())), dtype=object)
     combo = [{k: v for k, v in zip(param.keys(), arr)} for arr in design_mtx]
     return combo
 
+def get_full_design(p):
+    """
+    generate full factorial experiment for p two-level factors. The returned design 
+    matrix should be shaped 2^p * p. Returned matrix will be encoded using zero-sum 
+    constraints (-1 and 1).
+    """
+    levels = [-1, 1]
+    full_factorial = np.array(np.meshgrid(*([levels] * p))).T.reshape(-1, p)
 
+    return full_factorial
+
+       
+def get_2_interaction(design_mtx):
+   
+    num_columns = design_mtx.shape[1]
+    interaction_columns = []
+
+    for i in range(num_columns):
+        for j in range(i + 1, num_columns):
+            interaction_column = design_mtx[:, i] * design_mtx[:, j]
+            interaction_columns.append(interaction_column)
+
+    interaction_matrix = np.column_stack([design_mtx] + interaction_columns)
+    return interaction_matrix
+   
 def get_baseline_design(param) -> (np.ndarray, np.ndarray):
     """
     Function to get qualitative/discrete variable encoding using baseline 
@@ -194,98 +224,17 @@ def get_baseline_design(param) -> (np.ndarray, np.ndarray):
     return bsln_mtx, np.array(col_names)
 
 
-def get_param_types(param: dict):
-    """
-    A helper function to get types (integer or float) of param space. Returns a 
-    dictionary with keys as param names, and values as param types ("int" or "float")
-    `Param`: dict
-      {param_name: [(start, end), scale]}
-      param_name: name of hyperparameter
-      start: starting point of parameter value range
-      end: ending point of parameter value range
-      scale: "unif" for uniform range, "log10" for based-10 log range
-    """
-    param_types = {}
-    for name in param:
-      if isinstance(param[name][0][0], int) and isinstance(param[name][0][1], int):
-        param_types[name] = 'int'
-      elif isinstance(param[name][0][0], float) or isinstance(param[name][0][1], float):
-        param_types[name] = 'float'
-    return param_types
+def get_pb12():
+   
+    row1 = [1, 1, -1, 1, 1, 1, -1, -1, -1, 1, -1]
+    pb_12 = [row1]
+    for i in range(10):
+      last_trail = pb_12[-1][-1]
+      new = pb_12[-1].copy()
+      new.pop()
+      new.insert(0, last_trail)
+      pb_12.append(new)
+    pb_12.append([-1 for _ in range(11)]) 
+    pb_12 = np.array(pb_12) # 12*11 PB design generated
+    return pb_12
 
-def get_scale_loc(unit_range, param_range):
-
-    """
-    A helper function to get scale and location shifter from unit range to param range,
-    or vice versa. 
-    unit_range: [(start1, end1), (start2, end2), ...]
-    param_range: [[(start1, end1), scale1], [(start2, end2), scale2], ...]
-    """
-    # suppose unit range is unif(a, b), param range is unif(c, d)
-    # scale shifter = (d - c) / (b - a)
-    # loc shifter = c - (1 + scale)*a
-
-    # suppose unit range is unif(a, b), param range is log10-scaled(c, d)
-    # scale shifter = (d - c) / (log(b) - log(a))
-    # loc shifter = c - scale*log(a)
-
-    scale_shift, loc_shift = [], []
-    for i in range(len(param_range)):
-      a, b, c, d = unit_range[i][0], unit_range[i][1], param_range[i][0][0], param_range[i][0][1]
-      if param_range[i][1] == "unif":
-        scale = (d - c)/(b - a)
-        loc = c - (1+scale)*a
-      elif param_range[i][1] == "log10":
-        scale = (b - a)/(np.log10(d) - np.log10(c))
-        loc = a - scale*np.log10(c)
-      scale_shift.append(scale)
-      loc_shift.append(loc)
-    return np.array(scale_shift), np.array(loc_shift)
-
-def coor_change(coor, scale_shift, loc_shift, input_type, range_types, param_types):
-    """
-    A helper function to map the points between two coordinate system (spaces).
-    Scale and loc shift are obtained through get_scale_loc() function.
-
-    `coor`: point to be mapped
-    `scale_shift`: scale shifters
-    `loc_shift`: location shifters
-    `input_type`: "unit" if coor is from unit range, "param" if coor is
-    from param range
-    `range_types`: list of types of ranges. Type is either "unif" or "log10".
-    `param_types`: list of types of parameter spaces. Type is either "int" or "float"
-    """
-    # suppose unit range is unif(a, b), param range is unif(c, d). Map x from (a, b) to (c, d):
-    # mapped_x = loc + scale * x
-    # suppose unit range is unif(a, b), param range is unif(c, d). Map x from (c, d) to (a, b):
-    # mapped_x = (x - loc) / scale
-
-    # suppose unit range is unif(a, b), param range is log10-scaled (c, d). Map x from (a, b) to (c, d):
-    # mapped_x = 10^((x - loc)/scale)
-    # suppose unit range is unif(a, b), param range is log10-scaled (c, d). Map x from (c, d) to (a, b):
-    # mapped_x = log(x) * scale + loc
-
-    arr = []
-    if input_type == "unit":
-      for i in range(len(coor)):
-        if range_types[i] == "unif":
-          arr.append(loc_shift[i] + scale_shift[i] * coor[i])
-        elif range_types[i] == "log10":
-          arr.append(10**((coor[i] - loc_shift[i])/ scale_shift[i]))
-        
-    elif input_type == "param":
-      for i in range(len(coor)):
-        if range_types[i] == "unif":
-          arr.append((coor[i] - loc_shift[i]) / scale_shift[i])
-        elif range_types[i] == "log10":
-          arr.append(np.log10(coor[i]) * scale_shift[i] + loc_shift[i])
-
-    if input_type == 'unit':
-      # this means we are mapping to param space, need t be cautious of param types (int or float)
-      for i in range(len(param_types)):
-        if list(param_types.values())[i] == "int":
-          arr[i] = int(np.round(arr[i])) 
-          # native int() method does not do proper rounding
-          # np.round() does proper rounding, but will still return a float
-          # chaining eliminates both issues
-    return arr

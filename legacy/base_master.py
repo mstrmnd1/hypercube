@@ -1,6 +1,5 @@
 from sklearn import metrics
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
-from ..util.ops import check_param
 from abc import ABC, abstractmethod
 
 
@@ -70,7 +69,6 @@ class base(ABC):
                        https://scikit-learn.org/stable/modules/model_evaluation.html#scoring-parameter")
     self.cv = cv
     self.init_param = estimator.get_params()
-    self.param_type = check_param(self.estimator, self.param)
     self.random_state = random_state
 
   @abstractmethod
@@ -81,7 +79,7 @@ class base(ABC):
 
   def summary(self):
 
-    if self.method == "pair_t": # pair_t approach does not generate summary
+    if (self.method == "pair_t") or (self.method == "surf"): # pair_t approach does not generate summary
       pass
     else:
       for item in self._summary_:
