@@ -2,10 +2,13 @@ import hyperopt
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+from ..problem import *
 from ..util.ops import get_combo, get_baseline_design
 from ..util.stats import regression
-from ..optimizer import problem, algo
+from ..optimizer import algo
 import json
+from time import time
 
 
 class trial:
@@ -13,25 +16,22 @@ class trial:
     def __init__(self, prob, budget, dim) -> None:
 
         self.problem = prob
-        self.func = problem.problem_all(prob)["func"]
+        self.func = problem_all(prob)["func"]
         self.budget = budget
-        if problem.problem_all(prob)["dim"] is None:
+        if problem_all(prob)["dim"] is None:
             self.dim = dim
         else:
-            self.dim = problem.problem_all(prob)["dim"]
-        self.bounds = problem.problem_all(prob)["bounds"]
+            self.dim = problem_all(prob)["dim"]
+        self.bounds = problem_all(prob)["bounds"]
         if len(self.bounds) == 1:
             self.bounds = self.bounds * self.dim
 
     def regret_plot(self):
-
-        
-
         pass
 
     def solution_plot(self):
 
-        X1, X2, Z = problem.truth(self.problem)
+        X1, X2, Z = truth(self.problem)
         plt.figure(figsize=(8, 6))
         cax = plt.pcolormesh(X1, X2, Z, shading='auto', cmap='viridis')
         plt.colorbar(cax)
@@ -52,12 +52,13 @@ class trial:
 
         exp_attr = [attr for attr in vars(self) if 'export' in attr]
         res = [[l["best_res"] for l in list(getattr(self, name).values())] for name in exp_attr]
-        plt.boxplot(res)
+        labs = [attr.split("_")[-1] for attr in vars(self) if 'export' in attr]
+        plt.boxplot(res, labels=labs)
         plt.show()
 
     def analysis(self):
 
-        x, col_names = get_baseline_design(self.dict1)
+        x, col_names = get_baseline_design(self.param_dict)
         col_names = np.insert(col_names, 0, "intercept")
         exp_attr = [attr for attr in vars(self) if 'export' in attr]
         arr = [[l["best_res"] for l in list(getattr(self, name).values())] for name in exp_attr]
@@ -70,41 +71,65 @@ class trial:
     def run_all(self, iter):
         
         self.iter = iter
-        self._cube_temp("export1", adj_a=True, samp="ts", eff=3)
+        self._cube_temp("cube_export", adj_a=True, samp="ts", eff=3, n=10)
         self._tpe_run()
 
+    def n_exp(self, iter, ns):
+        self.iter = iter
+        self._rand_run()
+        for n in ns:
+            start = time()
+            self._cube_temp(f"cube_export_{n}", adj_a=True, samp="ts", eff=3, n=n)
+            end = time()
+            print(f"n={n}, duration: {end - start}")
+        start = time()
+        self._tpe_run()
+        end = time()
+        print(f"tpe duration: {end-start}")
+
+    
+    def try_cube2(self, iter):
+
+        self.iter = iter
+        self._rand_run()
+        self.cube2_export = {}
+        for i in range(self.iter):
+            export = algo.CuBE2(self.func, obj="min", bounds=self.bounds, budget=self.budget,
+                                adj_a=True, samp="ts", eff=1, n=self.budget)
+            self.cube2_export[i] = export
+        self._tpe_run()
+
+    def baselines(self, iter):
+        self.iter = iter
+        self._rand_run()
+        self._lhs_run()
+        self._tpe_run()
 
     def _rand_run(self):
-        self.rand_export = {}
+        self.export_rand = {}
         for i in range(self.iter):    
             export = algo.RandSearch(self.func, obj="min", bounds=self.bounds, budget=self.budget)
-            self.rand_export[i] = export
+            self.export_rand[i] = export
 
     def _lhs_run(self):
-        self.lhs_export = {}
+        self.export_lhs = {}
         for i in range(self.iter):    
             export = algo.Latin(self.func, obj="min", bounds=self.bounds, budget=self.budget)
-            self.lhs_export[i] = export
+            self.export_lhs[i] = export
     
-    def _cube_temp(self, export_attr, adj_a, samp, eff):
+    def _cube_temp(self, export_attr, adj_a, samp, eff, n):
         setattr(self, export_attr, {})
         for i in range(self.iter):
             export = algo.CuBE(self.func, obj="min", bounds=self.bounds, budget=self.budget,  
-                               adj_a=adj_a, samp=samp, eff=eff)
+                               adj_a=adj_a, samp=samp, eff=eff, n=n)
             getattr(self, export_attr)[i] = export
-        with open('data_cube.json', 'w') as file:
-            json.dump(getattr(self, export_attr), file)
-        delattr(self, export_attr)
     
 
-    def algo_run(self, iter):
+    def algo_run(self, iter, param_dict):
 
-        dict1 = {"adj_a": [True, False],
-                 "samp": ["ts", "opm", "ttts"],
-                 "eff": [1, 3, 5]}
-        self.dict1 = dict1
+        self.param_dict = param_dict
         self.iter = iter
-        combo = get_combo(dict1)
+        combo = get_combo(param_dict)
         self.combo = combo
         for c in combo:
             val_list = [str(item) for item in list(c.values())]
@@ -134,7 +159,7 @@ class trial:
                 space[f"x{i}"] = hyperopt.hp.uniform(f"x{i}", self.bounds[i][0], 
                                                      self.bounds[i][1])
 
-        name = method.__name__.split(".")[1] + "_export"
+        name = "export_" + method.__name__.split(".")[1] 
         setattr(self, name, {})
         for i in range(self.iter):
             trials = hyperopt.Trials()
@@ -142,13 +167,12 @@ class trial:
                                  max_evals=self.budget, trials=trials)
             
             dict_exp = getattr(self, name, {})
-            dict_exp[i] = {"best_x": list(best.values()), "best_res": np.min(trials.losses()),
-                           "all_x": np.array(list(trials.vals.values())).T.tolist(), 
-                           "all_res": list(trials.losses())}
+            dict_exp[i] = {"best_x": list(best.values()), "best_res": np.min(trials.losses())
+                        #    "all_x": np.array(list(trials.vals.values())).T.tolist(), 
+                        #    "all_res": list(trials.losses())
+                           }
             setattr(self, name, dict_exp)
-        with open('data_hyp.json', 'w') as file:
-            json.dump(getattr(self, name), file)
-        delattr(self, name)
+
 
     
     def del_export(self):
