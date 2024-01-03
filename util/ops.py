@@ -223,6 +223,7 @@ def get_baseline_design(param) -> (np.ndarray, np.ndarray):
     bsln_mtx = np.array(bsln_mtx).T
     return bsln_mtx, np.array(col_names)
 
+
 def get_pb12():
    
     row1 = [1, 1, -1, 1, 1, 1, -1, -1, -1, 1, -1]
@@ -237,81 +238,3 @@ def get_pb12():
     pb_12 = np.array(pb_12) # 12*11 PB design generated
     return pb_12
 
-def get_param_types(param: dict):
-    """
-    A helper function to get types (integer or float) of param space. Returns a 
-    dictionary with keys as param names, and values as param types ("int" or "float")
-    `Param`: dict
-      {param_name: [(start, end), range_type]}
-      param_name: name of hyperparameter
-      start: starting point of parameter value range
-      end: ending point of parameter value range
-      range_type: "unif" for uniform range, "log10" for based-10 log range
-    """
-    param_types = []
-    for name in param:
-      if isinstance(param[name][0][0], int) and isinstance(param[name][0][1], int):
-        param_types.append('int')
-      elif isinstance(param[name][0][0], float) or isinstance(param[name][0][1], float):
-        param_types.append('float')
-    return param_types
-
-
-def coor_change(x, param_type, loc_scale, dist_type, input_type, unit_range=None):
-
-  """
-  Helper function for coordinate changes. 
-  
-  x: list or np.ndarray   
-    Must be one-dimensional.  
-  param_type: list
-    A list of parameter types: "int" or "float"
-  loc_scale: list  
-    A list of tuples of form (loc, scale) for parameter distribution.  
-  dist_type: list
-    A list of parameter distribution. Values must be "log10", "unif" or "norm"
-  input_type: str
-    Type of input coordinates to be mapped. If input_type == "unit", then map points
-    to param space. If input_type == "param", map points to unit space. 
-  """
-  x = np.array(x)
-  new = []
-  trfm = {"log10": loguniform,
-          "unif": uniform,
-          "norm": norm}
-
-  n = len(x)
-  if unit_range is None:
-    if input_type == "unit":
-      for i in range(n):
-        new.append(trfm[dist_type[i]].ppf(x[i], loc_scale[i][0], 
-                                            loc_scale[i][1]))
-    elif input_type == "param":
-      for i in range(n):
-        new.append(trfm[dist_type[i]].cdf(x[i],loc_scale[i][0], 
-                                            loc_scale[i][1]))
-  else:
-    if input_type == "unit":
-      for i in range(n):
-        cdf = uniform.cdf(x[i], unit_range[i][0], unit_range[i][1])
-        new.append(trfm[dist_type[i]].ppf(cdf, loc_scale[i][0], 
-                                          loc_scale[i][1]))
-    elif input_type == "param":
-      for i in range(n):
-        cdf = trfm[dist_type[i]].cdf(x[i],loc_scale[i][0], loc_scale[i][1])
-        new.append(uniform.pdf(cdf, unit_range[i][0], unit_range[i][1]))
-    else:
-       raise TypeError
-     
-
-  if input_type == 'unit':
-      # this means we are mapping to param space, need t be cautious of param types (int or float)
-      for i in range(n):
-        if param_type[i] == "int":
-            new[i] = int(np.round(new[i])) 
-          # native int() method does not do proper rounding
-          # np.round() does proper rounding, but will still return a float
-          # chaining eliminates both issues
-  return new
-
-  
