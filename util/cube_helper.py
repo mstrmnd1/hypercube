@@ -1,13 +1,12 @@
 import numpy as np
-
+from math import floor
 
 def update_grid(unit_x, success, alpha, beta, eff):
-    coor = np.ceil(unit_x / (1 / alpha.shape[0])).astype(int)
-    nbhd = tuple(slice(max(0, i-1), min(dim, i+2)) for i, dim in zip(coor, alpha.shape))
+    coor = unit_to_idx(unit_x, alpha.shape[0])
     if success:
-        alpha[nbhd] += eff
+        alpha[coor] += eff
     else:
-        beta[nbhd] += eff
+        beta[coor] += eff
     return alpha, beta
 
 def update(obj, res, cutoff, unit_x, alpha, beta, eff):
@@ -71,4 +70,20 @@ def sampling(samp, alpha, beta):
         idx = TTTS(alpha=alpha, beta=beta)
     return idx
 
+def unit_to_idx(unit, n):
+    idx = []
+    for p in unit:
+        i = floor(p * n)
+        if p == 1:
+            i = n - 1
+        idx.append(i)
+    return np.array(idx)
 
+def rem(bounds):
+
+    p = len(bounds)
+    low = np.array([tup[0] for tup in bounds])
+    high = np.array([tup[1] for tup in bounds])
+    A = np.random.random((3, p))
+    new_bounds = [(l, h) for l, h in zip(A @ low, A @ high)]
+    return A, new_bounds
